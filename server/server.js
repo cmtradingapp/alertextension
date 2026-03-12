@@ -13,6 +13,15 @@ const path = require('path');
 const app = express();
 app.use(express.json());
 
+// Allow requests from Chrome extensions and any origin
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 // ── Config ──────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || '3099', 10);
 const JWT_SECRET = process.env.JWT_SECRET;
