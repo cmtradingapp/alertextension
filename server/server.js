@@ -55,7 +55,7 @@ async function refreshAgentMap() {
   try {
     const pool = await sql.connect(mssqlConfig);
     const result = await pool.request().query(
-      "SELECT id, email FROM report.vtiger_users WHERE email IS NOT NULL AND email <> '' AND is_admin = 1"
+      "SELECT id, email FROM report.vtiger_users WHERE email IS NOT NULL AND email <> ''"
     );
     const map = {};
     for (const row of result.recordset) {
