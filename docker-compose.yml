@@ -1,0 +1,17 @@
+services:
+  app:
+    build: ./server
+    ports:
+      - "3099:3099"
+    env_file:
+      - ./server/.env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - default
+      - igalc_default   # reach igalc-postgres-1 for user auth
+
+networks:
+  igalc_default:
+    external: true

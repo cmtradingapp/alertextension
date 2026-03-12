@@ -1,0 +1,251 @@
+'use strict';
+require('dotenv').config();
+
+const express = require('express');
+const { Pool } = require('pg');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+app.use(express.json());
+
+// ── Config ──────────────────────────────────────────────────────────────────
+const PORT = parseInt(process.env.PORT || '3099', 10);
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) { console.error('FATAL: JWT_SECRET is required'); process.exit(1); }
+
+const WEBHOOK_SECRET = process.env.SQUARETALK_WEBHOOK_SECRET;
+const CRM_API_TOKEN = process.env.CRM_API_TOKEN || '699a3696-5869-44c9-aa31-1938f296a556';
+const CRM_API_BASE = 'https://apicrm.cmtrading.com/SignalsCRM/crm-api';
+
+const AGENT_MAP_PATH = path.join('/app/data', 'agent-map.json');
+
+// ── PostgreSQL (backoffice DB for user auth) ─────────────────────────────────
+const pool = new Pool({
+  host: process.env.POSTGRES_HOST || 'igalc-postgres-1',
+  port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+  database: process.env.POSTGRES_DB || 'backoffice',
+  user: process.env.POSTGRES_USER,
+  password: process.env.POSTGRES_PASSWORD,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+// ── Agent map: salesRepId (string) → agentEmail ──────────────────────────────
+let agentMap = {};
+
+function loadAgentMap() {
+  try {
+    if (fs.existsSync(AGENT_MAP_PATH)) {
+      agentMap = JSON.parse(fs.readFileSync(AGENT_MAP_PATH, 'utf8'));
+      console.log(`[AgentMap] Loaded ${Object.keys(agentMap).length} entries`);
+    } else {
+      agentMap = {};
+      console.log('[AgentMap] No map file — starting empty. Use POST /admin/agent-map to add entries.');
+    }
+  } catch (err) {
+    console.error('[AgentMap] Load failed:', err.message);
+    agentMap = {};
+  }
+}
+
+function saveAgentMap() {
+  fs.mkdirSync(path.dirname(AGENT_MAP_PATH), { recursive: true });
+  fs.writeFileSync(AGENT_MAP_PATH, JSON.stringify(agentMap, null, 2));
+}
+
+loadAgentMap();
+
+// ── SSE connections: Map<email, Set<Response>> ───────────────────────────────
+const connections = new Map();
+
+function addConn(email, res) {
+  if (!connections.has(email)) connections.set(email, new Set());
+  connections.get(email).add(res);
+}
+function removeConn(email, res) {
+  const s = connections.get(email);
+  if (s) { s.delete(res); if (s.size === 0) connections.delete(email); }
+}
+function pushToAgent(email, data) {
+  const s = connections.get(email);
+  if (!s || s.size === 0) return false;
+  const msg = `data: ${JSON.stringify(data)}\n\n`;
+  for (const res of s) { try { res.write(msg); } catch (_) {} }
+  return true;
+}
+
+// ── CRM API helper ───────────────────────────────────────────────────────────
+function crmGet(endpoint) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(`${CRM_API_BASE}${endpoint}`, {
+      headers: { 'x-crm-api-token': CRM_API_TOKEN },
+    }, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); }
+        catch (e) { reject(new Error(`Non-JSON from CRM: ${body.slice(0, 200)}`)); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// ── Admin auth middleware ─────────────────────────────────────────────────────
+function requireAdmin(req, res, next) {
+  const raw = req.headers['authorization'] || '';
+  const token = raw.replace(/^Bearer\s+/i, '');
+  try {
+    const p = jwt.verify(token, JWT_SECRET);
+    if (p.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+    req.user = p;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+}
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+
+// Health
+app.get('/health', (_req, res) => {
+  let total = 0;
+  connections.forEach(s => total += s.size);
+  res.json({ status: 'ok', uptime: Math.floor(process.uptime()), connectedAgents: connections.size, totalConnections: total });
+});
+
+// Login — validates against backoffice PostgreSQL (bcrypt-compatible)
+app.post('/auth/login', async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' });
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, username, email, hashed_password, role, is_active FROM users WHERE username = $1',
+      [username]
+    );
+    const user = rows[0];
+    if (!user || !await bcrypt.compare(password, user.hashed_password))
+      return res.status(401).json({ error: 'Invalid credentials' });
+    if (!user.is_active)
+      return res.status(403).json({ error: 'Account disabled' });
+
+    const email = user.email || user.username;
+    const token = jwt.sign({ id: user.id, username: user.username, email, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ token, username: user.username, email, role: user.role });
+  } catch (err) {
+    console.error('[Login]', err.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// SSE stream (token passed as query param since EventSource can't set headers)
+app.get('/events', (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(401).send('token required');
+  let payload;
+  try { payload = jwt.verify(token, JWT_SECRET); }
+  catch { return res.status(401).send('Invalid token'); }
+
+  const email = payload.email || payload.username;
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Access-Control-Allow-Origin': '*',
+  });
+  res.write(`data: ${JSON.stringify({ type: 'connected', email })}\n\n`);
+  addConn(email, res);
+  console.log(`[SSE] +${email} (${connections.get(email)?.size} conn)`);
+
+  const ping = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch { clearInterval(ping); }
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(ping);
+    removeConn(email, res);
+    console.log(`[SSE] -${email}`);
+  });
+});
+
+// SquareTalk webhook
+app.post('/squaretalk-webhook', async (req, res) => {
+  if (WEBHOOK_SECRET && req.headers['x-squaretalk-secret'] !== WEBHOOK_SECRET) {
+    console.warn('[Webhook] Bad secret');
+    return res.status(401).json({ error: 'Invalid secret' });
+  }
+
+  const { client_id } = req.body || {};
+  if (!client_id) return res.status(400).json({ error: 'client_id required' });
+  console.log(`[Webhook] client_id=${client_id}`);
+
+  try {
+    const data = await crmGet(`/user?id=${client_id}`);
+    const r = data.result || data;
+    const salesRepId = String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+    const clientName = [r.firstName, r.lastName].filter(Boolean).join(' ') || `Client ${client_id}`;
+    const country = r.country || r.countryCode || '';
+    console.log(`[Webhook] client="${clientName}" salesRep=${salesRepId}`);
+
+    const agentEmail = salesRepId ? agentMap[salesRepId] : null;
+    if (!agentEmail) {
+      console.warn(`[Webhook] No mapping for salesRep=${salesRepId}`);
+      return res.json({ status: 'no_agent_mapping', salesRepId });
+    }
+
+    const event = {
+      type: 'incoming_call',
+      clientId: client_id,
+      clientName,
+      country,
+      salesRepId,
+      crmUrl: `https://crm.cmtrading.com/#/users/user/${client_id}`,
+      timestamp: new Date().toISOString(),
+    };
+
+    const delivered = pushToAgent(agentEmail, event);
+    console.log(`[Webhook] → ${agentEmail}: ${delivered ? 'delivered' : 'offline'}`);
+    res.json({ status: delivered ? 'delivered' : 'agent_offline', agentEmail, clientName });
+  } catch (err) {
+    console.error('[Webhook]', err.message);
+    res.status(500).json({ error: 'Processing failed', detail: err.message });
+  }
+});
+
+// Admin: list live connections
+app.get('/admin/connections', requireAdmin, (_req, res) => {
+  const agents = [];
+  connections.forEach((s, email) => agents.push({ email, connections: s.size }));
+  res.json({ agents, total: agents.reduce((n, a) => n + a.connections, 0) });
+});
+
+// Admin: view agent map
+app.get('/admin/agent-map', requireAdmin, (_req, res) => res.json(agentMap));
+
+// Admin: add/update mapping
+app.post('/admin/agent-map', requireAdmin, (req, res) => {
+  const { crm_id, email } = req.body || {};
+  if (!crm_id || !email) return res.status(400).json({ error: 'crm_id and email required' });
+  agentMap[String(crm_id)] = email;
+  saveAgentMap();
+  res.json({ ok: true, crm_id, email, total: Object.keys(agentMap).length });
+});
+
+// Admin: delete mapping
+app.delete('/admin/agent-map/:crmId', requireAdmin, (req, res) => {
+  delete agentMap[req.params.crmId];
+  saveAgentMap();
+  res.json({ ok: true, deleted: req.params.crmId });
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`[Server] Port ${PORT} | AgentMap: ${Object.keys(agentMap).length} entries`);
+});
