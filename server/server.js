@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const { Pool } = require('pg');
+const sql = require('mssql');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const https = require('https');
@@ -21,8 +22,6 @@ const WEBHOOK_SECRET = process.env.SQUARETALK_WEBHOOK_SECRET;
 const CRM_API_TOKEN = process.env.CRM_API_TOKEN || '699a3696-5869-44c9-aa31-1938f296a556';
 const CRM_API_BASE = 'https://apicrm.cmtrading.com/SignalsCRM/crm-api';
 
-const AGENT_MAP_PATH = path.join('/app/data', 'agent-map.json');
-
 // ── PostgreSQL (backoffice DB for user auth) ─────────────────────────────────
 const pool = new Pool({
   host: process.env.POSTGRES_HOST || 'igalc-postgres-1',
@@ -35,30 +34,44 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+// ── MSSQL (report.vtiger_users for salesRep → email map) ────────────────────
+const mssqlConfig = {
+  server: process.env.MSSQL_SERVER,
+  database: process.env.MSSQL_DATABASE || 'cmt_main',
+  user: process.env.MSSQL_USER,
+  password: process.env.MSSQL_PASSWORD,
+  options: { encrypt: true, trustServerCertificate: true },
+  pool: { max: 3, min: 0, idleTimeoutMillis: 30000 },
+};
+
 // ── Agent map: salesRepId (string) → agentEmail ──────────────────────────────
 let agentMap = {};
 
-function loadAgentMap() {
+async function refreshAgentMap() {
+  if (!process.env.MSSQL_SERVER) {
+    console.log('[AgentMap] MSSQL_SERVER not set — skipping auto-refresh');
+    return;
+  }
   try {
-    if (fs.existsSync(AGENT_MAP_PATH)) {
-      agentMap = JSON.parse(fs.readFileSync(AGENT_MAP_PATH, 'utf8'));
-      console.log(`[AgentMap] Loaded ${Object.keys(agentMap).length} entries`);
-    } else {
-      agentMap = {};
-      console.log('[AgentMap] No map file — starting empty. Use POST /admin/agent-map to add entries.');
+    const pool = await sql.connect(mssqlConfig);
+    const result = await pool.request().query(
+      "SELECT id, email FROM report.vtiger_users WHERE email IS NOT NULL AND email <> '' AND is_admin = 1"
+    );
+    const map = {};
+    for (const row of result.recordset) {
+      if (row.id && row.email) map[String(row.id)] = row.email;
     }
+    agentMap = map;
+    console.log(`[AgentMap] Refreshed from MSSQL: ${Object.keys(map).length} agents`);
+    await sql.close();
   } catch (err) {
-    console.error('[AgentMap] Load failed:', err.message);
-    agentMap = {};
+    console.error('[AgentMap] MSSQL refresh failed:', err.message);
   }
 }
 
-function saveAgentMap() {
-  fs.mkdirSync(path.dirname(AGENT_MAP_PATH), { recursive: true });
-  fs.writeFileSync(AGENT_MAP_PATH, JSON.stringify(agentMap, null, 2));
-}
-
-loadAgentMap();
+// Refresh on startup and every 5 minutes
+refreshAgentMap();
+setInterval(refreshAgentMap, 5 * 60 * 1000);
 
 // ── SSE connections: Map<email, Set<Response>> ───────────────────────────────
 const connections = new Map();
@@ -227,22 +240,22 @@ app.get('/admin/connections', requireAdmin, (_req, res) => {
 });
 
 // Admin: view agent map
-app.get('/admin/agent-map', requireAdmin, (_req, res) => res.json(agentMap));
+app.get('/admin/agent-map', requireAdmin, (_req, res) => {
+  res.json({ total: Object.keys(agentMap).length, map: agentMap });
+});
 
-// Admin: add/update mapping
+// Admin: force refresh from MSSQL
+app.post('/admin/agent-map/refresh', requireAdmin, async (_req, res) => {
+  await refreshAgentMap();
+  res.json({ ok: true, total: Object.keys(agentMap).length });
+});
+
+// Admin: manual override (add/update single entry)
 app.post('/admin/agent-map', requireAdmin, (req, res) => {
   const { crm_id, email } = req.body || {};
   if (!crm_id || !email) return res.status(400).json({ error: 'crm_id and email required' });
   agentMap[String(crm_id)] = email;
-  saveAgentMap();
   res.json({ ok: true, crm_id, email, total: Object.keys(agentMap).length });
-});
-
-// Admin: delete mapping
-app.delete('/admin/agent-map/:crmId', requireAdmin, (req, res) => {
-  delete agentMap[req.params.crmId];
-  saveAgentMap();
-  res.json({ ok: true, deleted: req.params.crmId });
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
