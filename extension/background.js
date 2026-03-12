@@ -11,7 +11,7 @@ let reconnectTimer = null;
 
 // ── SSE connection ────────────────────────────────────────────────────────────
 async function connect() {
-  const { token, email } = await chrome.storage.local.get(['token', 'email']);
+  const { token, email } = await chrome.storage.session.get(['token', 'email']);
   if (!token || !email) {
     console.log('[BG] Not logged in, skipping SSE connect');
     return;
@@ -26,7 +26,7 @@ async function connect() {
   es.onopen = () => {
     console.log('[BG] SSE connected');
     reconnectDelay = RECONNECT_BASE_MS;
-    chrome.storage.local.set({ connected: true });
+    chrome.storage.session.set({ connected: true });
     chrome.action.setBadgeText({ text: '' });
     chrome.action.setBadgeBackgroundColor({ color: '#27AE60' });
   };
@@ -40,7 +40,7 @@ async function connect() {
 
   es.onerror = () => {
     console.log('[BG] SSE error — will reconnect in', reconnectDelay, 'ms');
-    chrome.storage.local.set({ connected: false });
+    chrome.storage.session.set({ connected: false });
     chrome.action.setBadgeText({ text: '!' });
     chrome.action.setBadgeBackgroundColor({ color: '#EB5757' });
     es.close();

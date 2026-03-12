@@ -79,18 +79,24 @@ function showLogin() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-chrome.storage.local.get(['token', 'email', 'connected', 'callHistory'], (data) => {
-  if (data.token && data.email) {
-    showDashboard(data.email, data.connected ?? false, data.callHistory || []);
-  } else {
-    showLogin();
-  }
+// Token stored in session storage (clears on browser close)
+// Saved email stored in local storage (persists for pre-fill)
+chrome.storage.session.get(['token', 'email', 'connected'], (session) => {
+  chrome.storage.local.get(['savedEmail', 'callHistory'], (local) => {
+    if (session.token && session.email) {
+      showDashboard(session.email, session.connected ?? false, local.callHistory || []);
+    } else {
+      // Pre-fill email if previously saved
+      if (local.savedEmail) document.getElementById('username').value = local.savedEmail;
+      showLogin();
+    }
+  });
 });
 
-// Refresh call history when popup opens (storage might have updated)
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.callHistory) renderHistory(changes.callHistory.newValue);
-  if (changes.connected !== undefined) setStatus(changes.connected.newValue);
+// Refresh call history when popup opens
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.callHistory) renderHistory(changes.callHistory.newValue);
+  if (area === 'session' && changes.connected !== undefined) setStatus(changes.connected.newValue);
 });
 
 // ── Login ─────────────────────────────────────────────────────────────────────
@@ -116,10 +122,14 @@ loginBtn.addEventListener('click', async () => {
       loginError.textContent = json.error || 'Login failed';
       return;
     }
-    await chrome.storage.local.set({ token: json.token, email: json.email || json.username, connected: false, callHistory: [] });
+    const email = json.email || json.username;
+    // Session: token + email (clears on browser close)
+    await chrome.storage.session.set({ token: json.token, email, connected: false });
+    // Local: save email for pre-fill next time (no password ever stored)
+    await chrome.storage.local.set({ savedEmail: email });
     // Tell background to connect SSE
     chrome.runtime.sendMessage({ type: 'connect' });
-    showDashboard(json.email || json.username, false, []);
+    showDashboard(email, false, await chrome.storage.local.get('callHistory').then(d => d.callHistory || []));
   } catch (err) {
     loginError.textContent = 'Connection error. Check server.';
   } finally {
@@ -133,7 +143,10 @@ document.getElementById('password').addEventListener('keydown', e => { if (e.key
 
 // ── Sign out ──────────────────────────────────────────────────────────────────
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
-  await chrome.storage.local.clear();
+  const { savedEmail } = await chrome.storage.local.get('savedEmail');
+  await chrome.storage.session.clear();
+  // Keep savedEmail and callHistory in local storage
   chrome.runtime.sendMessage({ type: 'disconnect' });
+  if (savedEmail) document.getElementById('username').value = savedEmail;
   showLogin();
 });
