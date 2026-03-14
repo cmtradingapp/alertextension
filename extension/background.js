@@ -35,6 +35,7 @@ async function connect() {
     try {
       const data = JSON.parse(e.data);
       if (data.type === 'incoming_call') handleIncomingCall(data);
+      else if (data.type !== 'connected') handleGenericEvent(data);
     } catch (_) {}
   };
 
@@ -95,6 +96,47 @@ async function handleIncomingCall(data) {
   // Update badge
   chrome.action.setBadgeText({ text: '●' });
   chrome.action.setBadgeBackgroundColor({ color: '#F2C94C' });
+}
+
+// ── Generic event (webhook events from cmtoperations) ─────────────────────────
+const EVENT_META = {
+  withdrawal_request:  { title: 'Withdrawal Request',  icon: '💸' },
+  withdrawal_change:   { title: 'Withdrawal Update',   icon: '💳' },
+  close_trade_live:    { title: 'Trade Closed',         icon: '📊' },
+  deposit_attempt:     { title: 'Deposit',              icon: '💰' },
+};
+
+async function handleGenericEvent(data) {
+  const ctx = data.data || {};
+  const meta = EVENT_META[data.type] || { title: data.type, icon: '🔔' };
+
+  // Build a short summary message from context fields
+  let message = `Customer: ${data.customer || '—'}`;
+  if (ctx.withdrawal_amount) message = `Amount: ${ctx.original_withdrawal_currency || ''} ${ctx.withdrawal_amount}  |  ${message}`;
+  if (ctx.deposit_amount)    message = `Amount: ${ctx.deposit_amount}  |  ${ctx.deposit_status || ''}  |  ${message}`;
+  if (ctx.profit !== undefined) message = `Profit: ${ctx.profit}  |  ${ctx.symbol || ''}  |  ${message}`;
+  if (ctx.withdrawal_status) message = `Status: ${ctx.withdrawal_status}  |  ${message}`;
+
+  console.log(`[BG] Generic event type=${data.type} customer=${data.customer}`);
+
+  // Save to event history
+  const { eventHistory = [] } = await chrome.storage.local.get('eventHistory');
+  eventHistory.unshift({
+    type: data.type,
+    customer: data.customer,
+    context: ctx,
+    timestamp: data.timestamp || new Date().toISOString(),
+  });
+  if (eventHistory.length > MAX_HISTORY) eventHistory.length = MAX_HISTORY;
+  await chrome.storage.local.set({ eventHistory });
+
+  chrome.notifications.create(`evt_${data.type}_${Date.now()}`, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: `${meta.icon} ${meta.title}`,
+    message,
+    priority: 1,
+  });
 }
 
 // Notification button click → open CRM

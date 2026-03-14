@@ -267,6 +267,68 @@ app.post('/admin/agent-map', requireAdmin, (req, res) => {
   res.json({ ok: true, crm_id, email, total: Object.keys(agentMap).length });
 });
 
+// ── Push event from cmtoperations (server-to-server) ─────────────────────────
+// POST /push-event
+// Authenticated via X-Push-Secret header matching PUSH_SECRET env var.
+// Body: { event_type, customer?, agent_email?, broadcast?, data: {...} }
+//   - agent_email: push to this specific agent only
+//   - customer: look up the assigned salesRep from agentMap and push to them
+//   - broadcast: true → push to ALL connected agents
+// At least one of agent_email / customer / broadcast must be provided.
+
+const PUSH_SECRET = process.env.PUSH_SECRET;
+
+app.post('/push-event', async (req, res) => {
+  if (PUSH_SECRET && req.headers['x-push-secret'] !== PUSH_SECRET) {
+    console.warn('[PushEvent] Bad secret');
+    return res.status(401).json({ error: 'Invalid secret' });
+  }
+
+  const { event_type, customer, agent_email, broadcast, data } = req.body || {};
+  if (!event_type) return res.status(400).json({ error: 'event_type required' });
+
+  const eventPayload = { type: event_type, customer: customer || null, data: data || {}, timestamp: new Date().toISOString() };
+
+  // broadcast → push to all connected agents
+  if (broadcast) {
+    let count = 0;
+    connections.forEach((s, email) => {
+      pushToAgent(email, eventPayload);
+      count++;
+    });
+    console.log(`[PushEvent] broadcast event_type=${event_type} to ${count} agent(s)`);
+    return res.json({ status: 'broadcast', recipients: count });
+  }
+
+  // Resolve target agent email
+  let targetEmail = agent_email || null;
+
+  if (!targetEmail && customer) {
+    // Try to look up from agentMap via CRM API (same as SquareTalk webhook)
+    try {
+      const clientData = await crmGet(`/user?id=${customer}`);
+      const r = clientData.result || clientData;
+      const salesRepId = String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+      if (salesRepId && agentMap[salesRepId]) {
+        targetEmail = agentMap[salesRepId];
+        console.log(`[PushEvent] customer=${customer} → salesRep=${salesRepId} → email=${targetEmail}`);
+      } else {
+        console.warn(`[PushEvent] No agent mapping for customer=${customer} salesRep=${salesRepId}`);
+      }
+    } catch (err) {
+      console.warn(`[PushEvent] CRM lookup failed for customer=${customer}: ${err.message}`);
+    }
+  }
+
+  if (!targetEmail) {
+    return res.json({ status: 'no_agent', customer, agent_email });
+  }
+
+  const delivered = pushToAgent(targetEmail, eventPayload);
+  console.log(`[PushEvent] event_type=${event_type} → ${targetEmail}: ${delivered ? 'delivered' : 'offline'}`);
+  return res.json({ status: delivered ? 'delivered' : 'agent_offline', agent_email: targetEmail });
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[Server] Port ${PORT} | AgentMap: ${Object.keys(agentMap).length} entries`);
