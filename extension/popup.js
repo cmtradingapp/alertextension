@@ -35,12 +35,15 @@ function formatTime(iso) {
   return d.toLocaleDateString();
 }
 
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
 function renderHistory(calls) {
-  if (!calls || calls.length === 0) {
+  const fresh = (calls || []).filter(c => Date.now() - new Date(c.timestamp).getTime() < ONE_HOUR_MS);
+  if (fresh.length === 0) {
     callListEl.innerHTML = '<div class="empty">No calls yet</div>';
     return;
   }
-  callListEl.innerHTML = calls.map(c => `
+  callListEl.innerHTML = fresh.map(c => `
     <div class="call-item">
       <div>
         <div class="call-name">${escHtml(c.clientName)}</div>
@@ -125,11 +128,11 @@ loginBtn.addEventListener('click', async () => {
     const email = json.email || json.username;
     // Session: token + email (clears on browser close)
     await chrome.storage.session.set({ token: json.token, email, connected: false });
-    // Local: save email for pre-fill next time (no password ever stored)
-    await chrome.storage.local.set({ savedEmail: email });
+    // Local: save email, clear any previous agent's call history
+    await chrome.storage.local.set({ savedEmail: email, callHistory: [] });
     // Tell background to connect SSE
     chrome.runtime.sendMessage({ type: 'connect' });
-    showDashboard(email, false, await chrome.storage.local.get('callHistory').then(d => d.callHistory || []));
+    showDashboard(email, false, []);
   } catch (err) {
     loginError.textContent = 'Connection error. Check server.';
   } finally {
@@ -145,7 +148,8 @@ document.getElementById('password').addEventListener('keydown', e => { if (e.key
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
   const { savedEmail } = await chrome.storage.local.get('savedEmail');
   await chrome.storage.session.clear();
-  // Keep savedEmail and callHistory in local storage
+  // Clear call history on sign-out so the next user doesn't see it
+  await chrome.storage.local.set({ callHistory: [] });
   chrome.runtime.sendMessage({ type: 'disconnect' });
   if (savedEmail) document.getElementById('username').value = savedEmail;
   showLogin();

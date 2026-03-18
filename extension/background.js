@@ -66,21 +66,25 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
 // ── Incoming call ─────────────────────────────────────────────────────────────
 async function handleIncomingCall(data) {
   console.log('[BG] Incoming call:', data.clientName);
 
-  // Save to history
+  const now = Date.now();
+  // Save to history, pruning entries older than 1 hour
   const { callHistory = [] } = await chrome.storage.local.get('callHistory');
-  callHistory.unshift({
+  const fresh = callHistory.filter(c => now - new Date(c.timestamp).getTime() < ONE_HOUR_MS);
+  fresh.unshift({
     clientId: data.clientId,
     clientName: data.clientName,
     country: data.country,
     crmUrl: data.crmUrl,
     timestamp: data.timestamp || new Date().toISOString(),
   });
-  if (callHistory.length > MAX_HISTORY) callHistory.length = MAX_HISTORY;
-  await chrome.storage.local.set({ callHistory, lastCall: Date.now() });
+  if (fresh.length > MAX_HISTORY) fresh.length = MAX_HISTORY;
+  await chrome.storage.local.set({ callHistory: fresh, lastCall: now });
 
   // Desktop notification
   chrome.notifications.create(`call_${data.clientId}_${Date.now()}`, {
