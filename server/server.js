@@ -241,6 +241,35 @@ app.post('/squaretalk-webhook', async (req, res) => {
   }
 });
 
+// Lookup agent ID by extension — joins Extension_new → vtiger_users on email
+// GET /agent-by-extension?extension=1234
+app.get('/agent-by-extension', async (req, res) => {
+  if (PUSH_SECRET && req.headers['x-push-secret'] !== PUSH_SECRET) {
+    return res.status(401).json({ error: 'Invalid secret' });
+  }
+  const { extension } = req.query;
+  if (!extension) return res.status(400).json({ error: 'extension query param required' });
+  if (!process.env.MSSQL_SERVER) return res.status(503).json({ error: 'MSSQL not configured' });
+  try {
+    const pool = await sql.connect(mssqlConfig);
+    const result = await pool.request()
+      .input('ext', extension)
+      .query(`
+        SELECT TOP 1 u.id, u.email
+        FROM report.Extension_new e
+        JOIN report.vtiger_users u ON u.email = e.email
+        WHERE e.extension = @ext
+      `);
+    await sql.close();
+    if (!result.recordset.length) return res.status(404).json({ error: 'agent not found for extension' });
+    const { id, email } = result.recordset[0];
+    res.json({ id: String(id), email });
+  } catch (err) {
+    console.error('[AgentByExtension]', err.message);
+    res.status(500).json({ error: 'lookup failed', detail: err.message });
+  }
+});
+
 // Admin: list live connections
 app.get('/admin/connections', requireAdmin, (_req, res) => {
   const agents = [];
