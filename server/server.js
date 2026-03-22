@@ -313,10 +313,10 @@ app.post('/push-event', async (req, res) => {
     return res.status(401).json({ error: 'Invalid secret' });
   }
 
-  const { event_type, customer, agent_email, broadcast, data } = req.body || {};
+  const { event_type, display_name, customer, agent_email, broadcast, data } = req.body || {};
   if (!event_type) return res.status(400).json({ error: 'event_type required' });
 
-  const eventPayload = { type: event_type, customer: customer || null, data: data || {}, timestamp: new Date().toISOString() };
+  const eventPayload = { type: event_type, display_name: display_name || null, customer: customer || null, data: data || {}, timestamp: new Date().toISOString() };
 
   // broadcast → push to all connected agents
   if (broadcast) {
