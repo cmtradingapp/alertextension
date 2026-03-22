@@ -113,7 +113,13 @@ async function handleGenericEvent(data) {
   const ctx = data.data || {};
   const displayName = data.display_name || data.type;
 
-  let message = `Customer: ${data.customer || '—'}`;
+  // Build notification message from available context fields
+  const parts = [];
+  if (ctx.userFullName) parts.push(ctx.userFullName);
+  if (data.customer)    parts.push(`ID: ${data.customer}`);
+  if (ctx.marginLevel)  parts.push(`Margin: ${ctx.marginLevel}`);
+  if (ctx.label)        parts.push(ctx.label);
+  const message = parts.length ? parts.join(' · ') : '—';
 
   console.log(`[BG] Generic event type=${data.type} display="${displayName}" customer=${data.customer}`);
 
@@ -136,25 +142,36 @@ async function handleGenericEvent(data) {
     iconUrl: 'icons/icon128.png',
     title: `🔔 ${displayName}`,
     message,
-    priority: 1,
+    buttons: data.customer ? [{ title: 'Open in CRM' }] : [],
+    priority: 2,
+    requireInteraction: true,
   });
 }
 
+function openLatestCrm(notifId) {
+  // Check if it's an event notification (starts with 'evt_')
+  if (notifId.startsWith('evt_')) {
+    chrome.storage.local.get('eventHistory', ({ eventHistory = [] }) => {
+      const evt = eventHistory[0];
+      if (evt?.customer) {
+        chrome.tabs.create({ url: `https://backoffice.cmtrading.com/retention/dial?client_id=${evt.customer}` });
+      }
+      chrome.notifications.clear(notifId);
+    });
+  } else {
+    chrome.storage.local.get('callHistory', ({ callHistory = [] }) => {
+      const call = callHistory[0];
+      if (call?.crmUrl) chrome.tabs.create({ url: call.crmUrl });
+      chrome.notifications.clear(notifId);
+    });
+  }
+}
+
 // Notification button click → open CRM
-chrome.notifications.onButtonClicked.addListener(async (notifId) => {
-  const { callHistory = [] } = await chrome.storage.local.get('callHistory');
-  const call = callHistory[0];
-  if (call?.crmUrl) chrome.tabs.create({ url: call.crmUrl });
-  chrome.notifications.clear(notifId);
-});
+chrome.notifications.onButtonClicked.addListener((notifId) => openLatestCrm(notifId));
 
 // Notification click → open CRM
-chrome.notifications.onClicked.addListener(async (notifId) => {
-  const { callHistory = [] } = await chrome.storage.local.get('callHistory');
-  const call = callHistory[0];
-  if (call?.crmUrl) chrome.tabs.create({ url: call.crmUrl });
-  chrome.notifications.clear(notifId);
-});
+chrome.notifications.onClicked.addListener((notifId) => openLatestCrm(notifId));
 
 // ── Messages from popup ───────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg) => {
