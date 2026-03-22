@@ -37,12 +37,6 @@ function formatTime(iso) {
 
 const ONE_HOUR_MS = 2 * 60 * 60 * 1000;
 
-const EVENT_META = {
-  withdrawal_request: { icon: '💸', label: 'Withdrawal Request' },
-  withdrawal_change:  { icon: '💳', label: 'Withdrawal Update' },
-  close_trade_live:   { icon: '📊', label: 'Trade Closed' },
-  deposit_attempt:    { icon: '💰', label: 'Deposit' },
-};
 
 function renderFeed(calls, events) {
   const now = Date.now();
@@ -73,15 +67,17 @@ function renderFeed(calls, events) {
           <div class="call-time">${formatTime(item.timestamp)}</div>
         </div>`;
     } else {
-      const meta = EVENT_META[item.type] || { icon: '🔔', label: item.type };
       const ctx = item.context || {};
+      const displayName = item.display_name || item.type;
       let detail = item.customer ? `Customer: ${escHtml(String(item.customer))}` : '';
       if (ctx.amount) detail = `Amount: ${escHtml(String(ctx.amount))}  ·  ${detail}`;
-      const crmUrl = item.customer ? `https://crm.cmtrading.com/#/users/user/${encodeURIComponent(item.customer)}` : null;
+      const crmUrl = item.customer
+        ? `https://backoffice.cmtrading.com/retention/dial?client_id=${encodeURIComponent(item.customer)}`
+        : null;
       return `
         <div class="call-item">
           <div>
-            <div class="call-name">${meta.icon} ${escHtml(meta.label)}</div>
+            <div class="call-name">🔔 ${escHtml(displayName)}</div>
             <div class="call-meta">${detail || '—'}</div>
             ${crmUrl ? `<a class="crm-link" href="${escHtml(crmUrl)}" target="_blank">Open in CRM →</a>` : ''}
           </div>
