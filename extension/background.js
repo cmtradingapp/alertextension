@@ -112,6 +112,7 @@ async function handleIncomingCall(data) {
 async function handleGenericEvent(data) {
   const ctx = data.data || {};
   const displayName = data.display_name || data.type;
+  const icon = ctx.icon || '🔔';
 
   // Build notification message from available context fields
   const parts = [];
@@ -128,6 +129,7 @@ async function handleGenericEvent(data) {
   eventHistory.unshift({
     type: data.type,
     display_name: displayName,
+    icon,
     customer: data.customer,
     context: ctx,
     timestamp: data.timestamp || new Date().toISOString(),
@@ -140,7 +142,7 @@ async function handleGenericEvent(data) {
   chrome.notifications.create(`evt_${data.type}_${Date.now()}`, {
     type: 'basic',
     iconUrl: 'icons/icon128.png',
-    title: `🔔 ${displayName}`,
+    title: `${icon} ${displayName}`,
     message,
     buttons: data.customer ? [{ title: 'Open in CRM' }] : [],
     priority: 2,

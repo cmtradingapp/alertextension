@@ -95,6 +95,7 @@ function renderFeed(calls, events) {
     } else {
       const ctx = item.context || {};
       const displayName = item.display_name || item.type;
+      const icon = item.icon || '🔔';
       const crmUrl = item.customer
         ? `https://backoffice.cmtrading.com/retention/dial?client_id=${encodeURIComponent(item.customer)}`
         : null;
@@ -106,7 +107,7 @@ function renderFeed(calls, events) {
       return `
         <div class="call-item">
           <div>
-            <div class="call-name">🔔 ${escHtml(displayName)}</div>
+            <div class="call-name">${escHtml(icon)} ${escHtml(displayName)}</div>
             ${parts.length ? `<div class="call-meta">${parts.join(' · ')}</div>` : ''}
             ${crmUrl ? `<a class="crm-link" href="${escHtml(crmUrl)}" target="_blank">Open in CRM →</a>` : ''}
           </div>
