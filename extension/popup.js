@@ -35,7 +35,7 @@ function formatTime(iso) {
   return d.toLocaleDateString();
 }
 
-const ONE_HOUR_MS = 2 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 24 * 60 * 60 * 1000;
 
 const filterEventEl = document.getElementById('filter-event');
 const filterClientEl = document.getElementById('filter-client');
@@ -94,16 +94,15 @@ function renderFeed(calls, events) {
         </div>`;
     } else {
       const ctx = item.context || {};
-      const displayName = item.display_name || item.type;
+      const displayName = (item.context && item.context.label) || item.display_name || item.type;
       const icon = item.icon || '🔔';
       const crmUrl = item.customer
         ? `https://backoffice.cmtrading.com/retention/dial?client_id=${encodeURIComponent(item.customer)}`
         : null;
       const parts = [];
-      if (ctx.userFullName) parts.push(escHtml(ctx.userFullName));
+      if (ctx.userFullName) parts.push(`<strong>${escHtml(ctx.userFullName)}</strong>`);
       if (item.customer)    parts.push(`ID: ${escHtml(String(item.customer))}`);
       if (ctx.marginLevel)  parts.push(`Margin: ${escHtml(String(ctx.marginLevel))}`);
-      if (ctx.label)        parts.push(escHtml(ctx.label));
       return `
         <div class="call-item">
           <div>

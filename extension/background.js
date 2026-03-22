@@ -66,7 +66,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-const ONE_HOUR_MS = 2 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 24 * 60 * 60 * 1000;
 
 async function incrementBadge() {
   const { unreadCount = 0 } = await chrome.storage.local.get('unreadCount');
@@ -111,7 +111,7 @@ async function handleIncomingCall(data) {
 // ── Generic event (webhook events from cmtoperations) ─────────────────────────
 async function handleGenericEvent(data) {
   const ctx = data.data || {};
-  const displayName = data.display_name || data.type;
+  const displayName = ctx.label || data.display_name || data.type;
   const icon = ctx.icon || '🔔';
 
   // Build notification message from available context fields
