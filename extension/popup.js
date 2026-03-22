@@ -35,7 +35,7 @@ function formatTime(iso) {
   return d.toLocaleDateString();
 }
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_HOUR_MS = 2 * 60 * 60 * 1000;
 
 const EVENT_META = {
   withdrawal_request: { icon: '💸', label: 'Withdrawal Request' },

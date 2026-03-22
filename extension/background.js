@@ -66,7 +66,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_HOUR_MS = 2 * 60 * 60 * 1000;
 
 async function incrementBadge() {
   const { unreadCount = 0 } = await chrome.storage.local.get('unreadCount');
