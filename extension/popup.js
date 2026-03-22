@@ -131,6 +131,7 @@ function showLogin() {
 chrome.storage.session.get(['token', 'email', 'connected'], (session) => {
   chrome.storage.local.get(['savedEmail', 'callHistory', 'eventHistory'], (local) => {
     if (session.token && session.email) {
+      chrome.runtime.sendMessage({ type: 'clear_badge' });
       showDashboard(session.email, session.connected ?? false, local.callHistory || [], local.eventHistory || []);
     } else {
       if (local.savedEmail) document.getElementById('username').value = local.savedEmail;

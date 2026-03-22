@@ -68,6 +68,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 
+async function incrementBadge() {
+  const { unreadCount = 0 } = await chrome.storage.local.get('unreadCount');
+  const next = unreadCount + 1;
+  await chrome.storage.local.set({ unreadCount: next });
+  chrome.action.setBadgeText({ text: String(next) });
+  chrome.action.setBadgeBackgroundColor({ color: '#F2C94C' });
+}
+
 // ── Incoming call ─────────────────────────────────────────────────────────────
 async function handleIncomingCall(data) {
   console.log('[BG] Incoming call:', data.clientName);
@@ -86,6 +94,8 @@ async function handleIncomingCall(data) {
   if (fresh.length > MAX_HISTORY) fresh.length = MAX_HISTORY;
   await chrome.storage.local.set({ callHistory: fresh, lastCall: now });
 
+  await incrementBadge();
+
   // Desktop notification
   chrome.notifications.create(`call_${data.clientId}_${Date.now()}`, {
     type: 'basic',
@@ -96,10 +106,6 @@ async function handleIncomingCall(data) {
     requireInteraction: true,
     priority: 2,
   });
-
-  // Update badge
-  chrome.action.setBadgeText({ text: '●' });
-  chrome.action.setBadgeBackgroundColor({ color: '#F2C94C' });
 }
 
 // ── Generic event (webhook events from cmtoperations) ─────────────────────────
@@ -134,6 +140,8 @@ async function handleGenericEvent(data) {
   if (eventHistory.length > MAX_HISTORY) eventHistory.length = MAX_HISTORY;
   await chrome.storage.local.set({ eventHistory });
 
+  await incrementBadge();
+
   chrome.notifications.create(`evt_${data.type}_${Date.now()}`, {
     type: 'basic',
     iconUrl: 'icons/icon128.png',
@@ -164,6 +172,11 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'connect') connect();
   if (msg.type === 'disconnect') {
     if (es) { es.close(); es = null; }
+    chrome.storage.local.set({ unreadCount: 0 });
+    chrome.action.setBadgeText({ text: '' });
+  }
+  if (msg.type === 'clear_badge') {
+    chrome.storage.local.set({ unreadCount: 0 });
     chrome.action.setBadgeText({ text: '' });
   }
 });
