@@ -37,9 +37,21 @@ function formatTime(iso) {
 
 const ONE_HOUR_MS = 2 * 60 * 60 * 1000;
 
+const filterEventEl = document.getElementById('filter-event');
+const filterClientEl = document.getElementById('filter-client');
+
+function updateEventDropdown(combined) {
+  const current = filterEventEl.value;
+  const types = [...new Set(combined.map(i => i._kind === 'call' ? 'incoming_call' : i.type))];
+  filterEventEl.innerHTML = '<option value="">All events</option>' +
+    types.map(t => `<option value="${escHtml(t)}" ${t === current ? 'selected' : ''}>${escHtml(t)}</option>`).join('');
+}
 
 function renderFeed(calls, events) {
   const now = Date.now();
+  const filterEvent = filterEventEl ? filterEventEl.value : '';
+  const filterClient = filterClientEl ? filterClientEl.value.trim().toLowerCase() : '';
+
   const freshCalls = (calls || [])
     .filter(c => now - new Date(c.timestamp).getTime() < ONE_HOUR_MS)
     .map(c => ({ ...c, _kind: 'call' }));
@@ -50,12 +62,26 @@ function renderFeed(calls, events) {
   const combined = [...freshCalls, ...freshEvents]
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-  if (combined.length === 0) {
+  updateEventDropdown(combined);
+
+  const visible = combined.filter(item => {
+    if (filterEvent) {
+      const itemType = item._kind === 'call' ? 'incoming_call' : item.type;
+      if (itemType !== filterEvent) return false;
+    }
+    if (filterClient) {
+      const id = String(item.customer || item.clientId || '').toLowerCase();
+      if (!id.includes(filterClient)) return false;
+    }
+    return true;
+  });
+
+  if (visible.length === 0) {
     callListEl.innerHTML = '<div class="empty">No activity yet</div>';
     return;
   }
 
-  callListEl.innerHTML = combined.map(item => {
+  callListEl.innerHTML = visible.map(item => {
     if (item._kind === 'call') {
       return `
         <div class="call-item">
@@ -69,16 +95,19 @@ function renderFeed(calls, events) {
     } else {
       const ctx = item.context || {};
       const displayName = item.display_name || item.type;
-      let detail = item.customer ? `Customer: ${escHtml(String(item.customer))}` : '';
-      if (ctx.amount) detail = `Amount: ${escHtml(String(ctx.amount))}  ·  ${detail}`;
       const crmUrl = item.customer
         ? `https://backoffice.cmtrading.com/retention/dial?client_id=${encodeURIComponent(item.customer)}`
         : null;
+      const parts = [];
+      if (ctx.userFullName) parts.push(escHtml(ctx.userFullName));
+      if (item.customer)    parts.push(`ID: ${escHtml(String(item.customer))}`);
+      if (ctx.marginLevel)  parts.push(`Margin: ${escHtml(String(ctx.marginLevel))}`);
+      if (ctx.label)        parts.push(escHtml(ctx.label));
       return `
         <div class="call-item">
           <div>
             <div class="call-name">🔔 ${escHtml(displayName)}</div>
-            <div class="call-meta">${detail || '—'}</div>
+            ${parts.length ? `<div class="call-meta">${parts.join(' · ')}</div>` : ''}
             ${crmUrl ? `<a class="crm-link" href="${escHtml(crmUrl)}" target="_blank">Open in CRM →</a>` : ''}
           </div>
           <div class="call-time">${formatTime(item.timestamp)}</div>
@@ -86,7 +115,6 @@ function renderFeed(calls, events) {
     }
   }).join('');
 
-  // Make CRM links open via background (needed in MV3 popups)
   callListEl.querySelectorAll('.crm-link').forEach(a => {
     a.addEventListener('click', e => {
       e.preventDefault();
@@ -102,6 +130,10 @@ function renderHistory(calls, events) {
   if (events !== undefined) _events = events;
   renderFeed(_calls, _events);
 }
+
+// Wire up filters
+if (filterEventEl) filterEventEl.addEventListener('change', () => renderFeed(_calls, _events));
+if (filterClientEl) filterClientEl.addEventListener('input', () => renderFeed(_calls, _events));
 
 function escHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
