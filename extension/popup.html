@@ -177,7 +177,10 @@
     <span class="agent-email" id="agent-email"></span>
     <button class="sign-out" id="sign-out-btn">Sign Out</button>
   </div>
-  <div class="section-title">Recent Activity (last 24 hours)</div>
+  <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
+    <span>Recent Activity (last 24 hours)</span>
+    <span id="notif-count" style="background:rgba(45,126,255,0.2);color:#2D7EFF;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;display:none;">0</span>
+  </div>
   <div class="search-bar">
     <select id="filter-event"><option value="">All events</option></select>
     <input type="text" id="filter-client" placeholder="Client ID…">

@@ -76,6 +76,16 @@ function renderFeed(calls, events) {
     return true;
   });
 
+  const countEl = document.getElementById('notif-count');
+  if (countEl) {
+    if (visible.length > 0) {
+      countEl.textContent = visible.length;
+      countEl.style.display = 'inline-block';
+    } else {
+      countEl.style.display = 'none';
+    }
+  }
+
   if (visible.length === 0) {
     callListEl.innerHTML = '<div class="empty">No activity yet</div>';
     return;
@@ -99,10 +109,18 @@ function renderFeed(calls, events) {
       const crmUrl = item.customer
         ? `https://backoffice.cmtrading.com/retention/dial?client_id=${encodeURIComponent(item.customer)}`
         : null;
+      const contextFields = (Array.isArray(item.context_fields) && item.context_fields.length > 0)
+        ? item.context_fields
+        : [];
       const parts = [];
-      if (ctx.userFullName) parts.push(`<strong>${escHtml(ctx.userFullName)}</strong>`);
+      if (ctx.userFullName) parts.push(`<strong style="color:#f0f6fc">${escHtml(ctx.userFullName)}</strong>`);
       if (item.customer)    parts.push(`ID: ${escHtml(String(item.customer))}`);
-      if (ctx.marginLevel)  parts.push(`Margin: ${escHtml(String(ctx.marginLevel))}`);
+      for (const field of contextFields) {
+        if (ctx[field] != null) {
+          const label = field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          parts.push(`${escHtml(label)}: ${escHtml(String(ctx[field]))}`);
+        }
+      }
       return `
         <div class="call-item">
           <div>
@@ -202,7 +220,7 @@ loginBtn.addEventListener('click', async () => {
     // Session: token + email (clears on browser close)
     await chrome.storage.session.set({ token: json.token, email, connected: false });
     // Local: save email, clear any previous agent's history
-    await chrome.storage.local.set({ savedEmail: email, callHistory: [], eventHistory: [] });
+    await chrome.storage.local.set({ savedEmail: email });
     // Tell background to connect SSE
     chrome.runtime.sendMessage({ type: 'connect' });
     showDashboard(email, false, [], []);
@@ -221,8 +239,7 @@ document.getElementById('password').addEventListener('keydown', e => { if (e.key
 document.getElementById('sign-out-btn').addEventListener('click', async () => {
   const { savedEmail } = await chrome.storage.local.get('savedEmail');
   await chrome.storage.session.clear();
-  // Clear all history on sign-out so the next user doesn't see it
-  await chrome.storage.local.set({ callHistory: [], eventHistory: [] });
+  // History is preserved — expires naturally after 24 hours
   chrome.runtime.sendMessage({ type: 'disconnect' });
   if (savedEmail) document.getElementById('username').value = savedEmail;
   showLogin();

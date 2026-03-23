@@ -110,16 +110,24 @@ async function handleIncomingCall(data) {
 
 // ── Generic event (webhook events from cmtoperations) ─────────────────────────
 async function handleGenericEvent(data) {
+  console.log('[BG] handleGenericEvent full payload:', JSON.stringify(data));
   const ctx = data.data || {};
+  const contextFields = (Array.isArray(data.context_fields) && data.context_fields.length > 0)
+    ? data.context_fields
+    : [];
   const displayName = ctx.label || data.display_name || data.type;
   const icon = ctx.icon || '🔔';
 
-  // Build notification message from available context fields
+  // Build notification message: identity first, then dynamic context_fields
   const parts = [];
   if (ctx.userFullName) parts.push(ctx.userFullName);
   if (data.customer)    parts.push(`ID: ${data.customer}`);
-  if (ctx.marginLevel)  parts.push(`Margin: ${ctx.marginLevel}`);
-  if (ctx.label)        parts.push(ctx.label);
+  for (const field of contextFields) {
+    if (ctx[field] != null) {
+      const label = field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      parts.push(`${label}: ${ctx[field]}`);
+    }
+  }
   const message = parts.length ? parts.join(' · ') : '—';
 
   console.log(`[BG] Generic event type=${data.type} display="${displayName}" customer=${data.customer}`);
@@ -132,6 +140,7 @@ async function handleGenericEvent(data) {
     icon,
     customer: data.customer,
     context: ctx,
+    context_fields: contextFields,
     timestamp: data.timestamp || new Date().toISOString(),
   });
   if (eventHistory.length > MAX_HISTORY) eventHistory.length = MAX_HISTORY;

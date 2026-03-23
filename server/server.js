@@ -211,10 +211,10 @@ app.post('/squaretalk-webhook', async (req, res) => {
   try {
     const data = await crmGet(`/user?id=${client_id}`);
     const r = data.result || data;
-    const salesRepId = String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+    const salesRepId = String(r.retentionRep ?? r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
     const clientName = [r.firstName, r.lastName].filter(Boolean).join(' ') || `Client ${client_id}`;
     const country = r.country || r.countryCode || '';
-    console.log(`[Webhook] client="${clientName}" salesRep=${salesRepId}`);
+    console.log(`[Webhook] client="${clientName}" retentionRep/salesRep=${salesRepId}`);
 
     const agentEmail = salesRepId ? agentMap[salesRepId] : null;
     if (!agentEmail) {
@@ -313,10 +313,10 @@ app.post('/push-event', async (req, res) => {
     return res.status(401).json({ error: 'Invalid secret' });
   }
 
-  const { event_type, display_name, customer, agent_email, broadcast, data } = req.body || {};
+  const { event_type, display_name, customer, agent_email, broadcast, data, context_fields } = req.body || {};
   if (!event_type) return res.status(400).json({ error: 'event_type required' });
 
-  const eventPayload = { type: event_type, display_name: display_name || null, customer: customer || null, data: data || {}, timestamp: new Date().toISOString() };
+  const eventPayload = { type: event_type, display_name: display_name || null, customer: customer || null, data: data || {}, context_fields: context_fields || [], timestamp: new Date().toISOString() };
 
   // broadcast → push to all connected agents
   if (broadcast) {
@@ -337,12 +337,12 @@ app.post('/push-event', async (req, res) => {
     try {
       const clientData = await crmGet(`/user?id=${customer}`);
       const r = clientData.result || clientData;
-      const salesRepId = String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+      const salesRepId = String(r.retentionRep ?? r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
       if (salesRepId && agentMap[salesRepId]) {
         targetEmail = agentMap[salesRepId];
-        console.log(`[PushEvent] customer=${customer} → salesRep=${salesRepId} → email=${targetEmail}`);
+        console.log(`[PushEvent] customer=${customer} → retentionRep/salesRep=${salesRepId} → email=${targetEmail}`);
       } else {
-        console.warn(`[PushEvent] No agent mapping for customer=${customer} salesRep=${salesRepId}`);
+        console.warn(`[PushEvent] No agent mapping for customer=${customer} retentionRep/salesRep=${salesRepId}`);
       }
     } catch (err) {
       console.warn(`[PushEvent] CRM lookup failed for customer=${customer}: ${err.message}`);
