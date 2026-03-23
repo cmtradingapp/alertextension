@@ -211,10 +211,13 @@ app.post('/squaretalk-webhook', async (req, res) => {
   try {
     const data = await crmGet(`/user?id=${client_id}`);
     const r = data.result || data;
-    const salesRepId = String(r.retentionRep ?? r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+    const repId = r.acquisitionStatus === 'Retention'
+      ? String(r.retentionRep ?? '')
+      : String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+    const salesRepId = repId;
     const clientName = [r.firstName, r.lastName].filter(Boolean).join(' ') || `Client ${client_id}`;
     const country = r.country || r.countryCode || '';
-    console.log(`[Webhook] client="${clientName}" retentionRep/salesRep=${salesRepId}`);
+    console.log(`[Webhook] client="${clientName}" acquisitionStatus=${r.acquisitionStatus} rep=${salesRepId}`);
 
     const agentEmail = salesRepId ? agentMap[salesRepId] : null;
     if (!agentEmail) {
@@ -337,12 +340,14 @@ app.post('/push-event', async (req, res) => {
     try {
       const clientData = await crmGet(`/user?id=${customer}`);
       const r = clientData.result || clientData;
-      const salesRepId = String(r.retentionRep ?? r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+      const salesRepId = r.acquisitionStatus === 'Retention'
+        ? String(r.retentionRep ?? '')
+        : String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
       if (salesRepId && agentMap[salesRepId]) {
         targetEmail = agentMap[salesRepId];
-        console.log(`[PushEvent] customer=${customer} → retentionRep/salesRep=${salesRepId} → email=${targetEmail}`);
+        console.log(`[PushEvent] customer=${customer} acquisitionStatus=${r.acquisitionStatus} → rep=${salesRepId} → email=${targetEmail}`);
       } else {
-        console.warn(`[PushEvent] No agent mapping for customer=${customer} retentionRep/salesRep=${salesRepId}`);
+        console.warn(`[PushEvent] No agent mapping for customer=${customer} acquisitionStatus=${r.acquisitionStatus} rep=${salesRepId}`);
       }
     } catch (err) {
       console.warn(`[PushEvent] CRM lookup failed for customer=${customer}: ${err.message}`);
