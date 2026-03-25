@@ -231,7 +231,9 @@ app.post('/squaretalk-webhook', async (req, res) => {
       clientName,
       country,
       salesRepId,
-      crmUrl: `https://backoffice.cmtrading.com/retention/dial?client_id=${client_id}`,
+      crmUrl: r.acquisitionStatus === 'Retention'
+        ? `https://backoffice.cmtrading.com/retention/dial?client_id=${client_id}`
+        : `https://crm.cmtrading.com/#/users/user/${client_id}`,
       timestamp: new Date().toISOString(),
     };
 
