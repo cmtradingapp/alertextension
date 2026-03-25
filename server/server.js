@@ -321,7 +321,7 @@ app.post('/push-event', async (req, res) => {
   const { event_type, display_name, customer, agent_email, broadcast, data, context_fields } = req.body || {};
   if (!event_type) return res.status(400).json({ error: 'event_type required' });
 
-  const eventPayload = { type: event_type, display_name: display_name || null, customer: customer || null, data: data || {}, context_fields: context_fields || [], timestamp: new Date().toISOString() };
+  const eventPayload = { type: event_type, display_name: display_name || null, customer: customer || null, data: data || {}, context_fields: context_fields || [], crmUrl: null, timestamp: new Date().toISOString() };
 
   // broadcast → push to all connected agents
   if (broadcast) {
@@ -336,6 +336,7 @@ app.post('/push-event', async (req, res) => {
 
   // Resolve target agent email
   let targetEmail = agent_email || null;
+  let crmUrl = null;
 
   if (!targetEmail && customer) {
     // Try to look up from agentMap via CRM API (same as SquareTalk webhook)
@@ -345,6 +346,9 @@ app.post('/push-event', async (req, res) => {
       const salesRepId = r.acquisitionStatus === 'Retention'
         ? String(r.retentionRep ?? '')
         : String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+      crmUrl = r.acquisitionStatus === 'Retention'
+        ? `https://backoffice.cmtrading.com/retention/dial?client_id=${customer}`
+        : `https://crm.cmtrading.com/#/users/user/${customer}`;
       if (salesRepId && agentMap[salesRepId]) {
         targetEmail = agentMap[salesRepId];
         console.log(`[PushEvent] customer=${customer} acquisitionStatus=${r.acquisitionStatus} → rep=${salesRepId} → email=${targetEmail}`);
@@ -360,6 +364,7 @@ app.post('/push-event', async (req, res) => {
     return res.json({ status: 'no_agent', customer, agent_email });
   }
 
+  if (crmUrl) eventPayload.crmUrl = crmUrl;
   const delivered = pushToAgent(targetEmail, eventPayload);
   console.log(`[PushEvent] event_type=${event_type} → ${targetEmail}: ${delivered ? 'delivered' : 'offline'}`);
   return res.json({ status: delivered ? 'delivered' : 'agent_offline', agent_email: targetEmail });

@@ -141,6 +141,7 @@ async function handleGenericEvent(data) {
     customer: data.customer,
     context: ctx,
     context_fields: contextFields,
+    crmUrl: data.crmUrl || null,
     timestamp: data.timestamp || new Date().toISOString(),
   });
   if (eventHistory.length > MAX_HISTORY) eventHistory.length = MAX_HISTORY;

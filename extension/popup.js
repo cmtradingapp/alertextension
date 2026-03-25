@@ -106,9 +106,9 @@ function renderFeed(calls, events) {
       const ctx = item.context || {};
       const displayName = (item.context && item.context.label) || item.display_name || item.type;
       const icon = item.icon || '🔔';
-      const crmUrl = item.customer
+      const crmUrl = item.crmUrl || (item.customer
         ? `https://backoffice.cmtrading.com/retention/dial?client_id=${encodeURIComponent(item.customer)}`
-        : null;
+        : null);
       const contextFields = (Array.isArray(item.context_fields) && item.context_fields.length > 0)
         ? item.context_fields
         : [];
