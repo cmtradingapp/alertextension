@@ -349,9 +349,15 @@ app.post('/push-event', async (req, res) => {
       crmUrl = r.acquisitionStatus === 'Retention'
         ? `https://backoffice.cmtrading.com/retention/dial?client_id=${customer}`
         : `https://crm.cmtrading.com/#/users/user/${customer}`;
+      // Enrich event payload with client name from CRM
+      const clientName = [r.firstName, r.lastName].filter(Boolean).join(' ') || null;
+      if (clientName && !eventPayload.data.userFullName) {
+        eventPayload.data = { ...eventPayload.data, userFullName: clientName };
+      }
+
       if (salesRepId && agentMap[salesRepId]) {
         targetEmail = agentMap[salesRepId];
-        console.log(`[PushEvent] customer=${customer} acquisitionStatus=${r.acquisitionStatus} → rep=${salesRepId} → email=${targetEmail}`);
+        console.log(`[PushEvent] customer=${customer} acquisitionStatus=${r.acquisitionStatus} → rep=${salesRepId} → email=${targetEmail} name="${clientName}"`);
       } else {
         console.warn(`[PushEvent] No agent mapping for customer=${customer} acquisitionStatus=${r.acquisitionStatus} rep=${salesRepId}`);
       }
