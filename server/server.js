@@ -338,15 +338,13 @@ app.post('/push-event', async (req, res) => {
   let targetEmail = agent_email || null;
   let crmUrl = null;
 
-  if (!targetEmail && customer) {
-    // Try to look up from agentMap via CRM API (same as SquareTalk webhook)
+  if (customer) {
+    // Always look up customer from CRM to get correct crmUrl + enrich with client name
     try {
       const clientData = await crmGet(`/user?id=${customer}`);
       const r = clientData.result || clientData;
-      const salesRepId = r.acquisitionStatus === 'Retention'
-        ? String(r.retentionRep ?? '')
-        : String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
-      crmUrl = r.acquisitionStatus === 'Retention'
+      const isRetention = r.acquisitionStatus === 'Retention';
+      crmUrl = isRetention
         ? `https://backoffice.cmtrading.com/retention/dial?client_id=${customer}`
         : `https://crm.cmtrading.com/#/users/user/${customer}`;
       // Enrich event payload with client name from CRM
@@ -354,12 +352,17 @@ app.post('/push-event', async (req, res) => {
       if (clientName && !eventPayload.data.userFullName) {
         eventPayload.data = { ...eventPayload.data, userFullName: clientName };
       }
-
-      if (salesRepId && agentMap[salesRepId]) {
-        targetEmail = agentMap[salesRepId];
-        console.log(`[PushEvent] customer=${customer} acquisitionStatus=${r.acquisitionStatus} → rep=${salesRepId} → email=${targetEmail} name="${clientName}"`);
-      } else {
-        console.warn(`[PushEvent] No agent mapping for customer=${customer} acquisitionStatus=${r.acquisitionStatus} rep=${salesRepId}`);
+      // Resolve agent from CRM only if not already provided
+      if (!targetEmail) {
+        const salesRepId = isRetention
+          ? String(r.retentionRep ?? '')
+          : String(r.salesRep ?? r.sales_rep ?? r.salesRepId ?? '');
+        if (salesRepId && agentMap[salesRepId]) {
+          targetEmail = agentMap[salesRepId];
+          console.log(`[PushEvent] customer=${customer} acquisitionStatus=${r.acquisitionStatus} → rep=${salesRepId} → email=${targetEmail} name="${clientName}"`);
+        } else {
+          console.warn(`[PushEvent] No agent mapping for customer=${customer} acquisitionStatus=${r.acquisitionStatus} rep=${salesRepId}`);
+        }
       }
     } catch (err) {
       console.warn(`[PushEvent] CRM lookup failed for customer=${customer}: ${err.message}`);
